@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    container_name: fire-mint-app
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./app.py:/app/app.py
+    restart: unless-stopped
