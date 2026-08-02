@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
 
 import gradio as gr
 import pandas as pd
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -359,16 +363,29 @@ def build_ui() -> gr.Blocks:
     return demo
 
 
+QR_PAGE = Path(__file__).resolve().parent / "qr" / "index.html"
+
+
+def register_qr_route(app: FastAPI) -> None:
+    """Serve shared qr/index.html at GET /qr (copy the qr/ folder to other projects)."""
+
+    @app.get("/qr", include_in_schema=False)
+    def qr_page() -> FileResponse:
+        return FileResponse(QR_PAGE, media_type="text/html; charset=utf-8")
+
+
 def main():
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "7860"))
 
-    app = build_ui()
-    app.queue().launch(
-        server_name=host,
-        server_port=port,
-        share=False,
-    )
+    demo = build_ui()
+    demo.queue()
+
+    api = FastAPI()
+    register_qr_route(api)
+    app = gr.mount_gradio_app(api, demo, path="/")
+
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

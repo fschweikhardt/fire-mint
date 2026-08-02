@@ -21,6 +21,15 @@ docker compose up --build --watch
 
 Then open `http://localhost:7860` in your browser.
 
+## QR page (`/qr`)
+
+Open [`/qr`](http://localhost:7860/qr) to show a scannable QR code for this site (encodes the site root, not `/qr`). The page lives in [`qr/index.html`](qr/index.html)—copy the whole `qr/` folder into other projects:
+
+- **nginx + static frontend:** `frontend/public/qr/index.html` (served at `/qr` automatically)
+- **FastAPI / Gradio:** serve the same file at `GET /qr` (see `register_qr_route` in `app.py`)
+
+Optional: set `<meta name="qr-target" content="https://example.com/">` when serving if you need a fixed canonical URL.
+
 ## Deploy on Fly.io
 
 One-time setup (requires [flyctl](https://fly.io/docs/flyctl/install/) and `gh`):
