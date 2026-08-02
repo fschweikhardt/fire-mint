@@ -14,8 +14,10 @@ A simple Gradio-based retirement projection tool. Runs in Docker via docker comp
 ## Run
 
 ```bash
-docker compose up --build
+docker compose up --build --watch
 ```
+
+`--watch` restarts the app when `app.py` changes (bind mount keeps the file in sync; restart reloads Python). Without `--watch`, use `docker compose up --build` and restart manually after edits.
 
 Then open `http://localhost:7860` in your browser.
 
