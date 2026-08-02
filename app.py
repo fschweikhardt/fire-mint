@@ -1,3 +1,5 @@
+import os
+
 import gradio as gr
 import pandas as pd
 from dataclasses import dataclass
@@ -19,9 +21,14 @@ class Inputs:
     roth_annual_increase: float = 0
 
 
+def round_currency(amount: float) -> int:
+    """Round to the nearest dollar for display."""
+    return round(amount)
+
+
 def format_currency(amount: float) -> str:
     """Format a number as currency with commas."""
-    return f"{int(amount):,}"
+    return f"{round_currency(amount):,}"
 
 
 def project(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -63,11 +70,13 @@ def project(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         # Apply interest to current savings
         current_savings = current_savings * (1 + r)
 
-        # Calculate total (current savings + all account balances)
-        total = current_savings + hsa_bal + roth_bal + simple_bal
-
-        # Calculate fixed income based on total
-        fixed_income = total * fixed_r
+        # Round each balance for display so TOTAL always equals the column sum
+        initial_display = round_currency(current_savings)
+        hsa_display = round_currency(hsa_bal)
+        roth_display = round_currency(roth_bal)
+        simple_display = round_currency(simple_bal)
+        total_display = initial_display + hsa_display + roth_display + simple_display
+        fixed_income_display = round_currency(total_display * fixed_r)
 
         # 529 calculations (separate from retirement)
         plan_529_contrib = inputs.plan_529_annual
@@ -77,12 +86,12 @@ def project(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         retirement_rows.append(
             (
                 age,
-                format_currency(current_savings), # Initial savings with interest
-                format_currency(hsa_bal),        # HSA with interest
-                format_currency(roth_bal),       # ROTH with interest
-                format_currency(simple_bal),     # SIMPLE IRA with interest
-                format_currency(annual_in),      # This year's contributions
-                format_currency(total),          # Grand total
+                format_currency(initial_display),
+                format_currency(hsa_display),
+                format_currency(roth_display),
+                format_currency(simple_display),
+                format_currency(annual_in),
+                format_currency(total_display),
             )
         )
 
@@ -98,8 +107,8 @@ def project(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         fixed_income_rows.append(
             (
                 age,
-                format_currency(total),          # Total retirement savings
-                format_currency(fixed_income),   # Annual fixed income
+                format_currency(total_display),
+                format_currency(fixed_income_display),
             )
         )
 
@@ -136,6 +145,26 @@ def project(inputs: Inputs) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return retirement_df, education_df, fixed_income_df
 
 
+def _as_float(value, default: float = 0.0) -> float:
+    """Coerce Gradio Number values; empty fields arrive as None."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value, default: int = 0) -> int:
+    """Coerce Gradio Number values to int; empty fields arrive as None."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def compute_tables(
     hsa_annual: float,
     roth_annual: float,
@@ -154,13 +183,13 @@ def compute_tables(
     income_pct = pct_map.get(fixed_income_choice, 3.0)
 
     inputs = Inputs(
-        hsa_annual=hsa_annual,
-        roth_annual=roth_annual,
-        simple_ira_annual=simple_ira_annual,
-        plan_529_annual=plan_529_annual,
-        current_savings=current_savings,
-        start_age=start_age,
-        end_age=end_age,
+        hsa_annual=_as_float(hsa_annual),
+        roth_annual=_as_float(roth_annual),
+        simple_ira_annual=_as_float(simple_ira_annual),
+        plan_529_annual=_as_float(plan_529_annual),
+        current_savings=_as_float(current_savings),
+        start_age=_as_int(start_age, 40),
+        end_age=_as_int(end_age, 100),
         annual_return_pct=growth_pct,
         fixed_income_pct=income_pct,
         hsa_annual_increase=100 if hsa_increase_enabled else 0,
@@ -226,17 +255,16 @@ def build_ui() -> gr.Blocks:
         The retirement table shows how your savings grow each year:
         - **Age**: The year you'll be this age
         - **Initial Savings**: Your starting savings growing with interest
-        - **Account Balances**: Growth of contributions with interest for each account
+        - **Account Balances**: Cumulative contributions plus compound growth for each account
         - **ANNUAL IN**: Total new money added this year
-        - **TOTAL**: Sum of account balances plus initial savings
+        - **TOTAL**: Initial savings plus all account balances (equals the sum of those columns)
 
-        Note: Account balances show only the growth of your contributions.
-        The TOTAL includes both these balances and your initial savings with interest.
+        Note: Account balances already include contributions, so do not add ANNUAL IN to TOTAL.
         """)
         
         retirement_df = gr.Dataframe(
             wrap=True,
-            height=400,
+            max_height=400,
             label="Retirement Projection",
         )
 
@@ -260,7 +288,7 @@ def build_ui() -> gr.Blocks:
 
         fixed_income_df = gr.Dataframe(
             wrap=True,
-            height=300,
+            max_height=300,
             label="Fixed Income Projection",
         )
 
@@ -277,7 +305,7 @@ def build_ui() -> gr.Blocks:
         
         education_df = gr.Dataframe(
             wrap=True,
-            height=300,
+            max_height=300,
             label="529 Plan Projection",
         )
 
@@ -305,10 +333,22 @@ def build_ui() -> gr.Blocks:
 
 
 def main():
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "7860"))
+
     app = build_ui()
-    app.queue().launch(server_name="0.0.0.0", server_port=7860, share=True)
+    app.queue().launch(
+        server_name=host,
+        server_port=port,
+        share=False,
+    )
+
 
 if __name__ == "__main__":
-    import hupper
-    reloader = hupper.start_reloader("app.main")
+    if os.environ.get("RELOAD", "").lower() in ("1", "true", "yes"):
+        import hupper
+
+        reloader = hupper.start_reloader()
+        if reloader.is_running():
+            reloader.watch_files([__file__])
     main()
