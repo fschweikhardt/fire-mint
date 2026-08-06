@@ -7,9 +7,10 @@ sdk: docker
 app_port: 7860
 ---
 
+
 # Fire Mint Retirement Projection App
 
-A simple Gradio-based retirement projection tool. Runs in Docker via docker compose.
+A Gradio-based retirement and education projection tool. Runs in Docker via docker compose.
 
 ## Run
 
@@ -49,9 +50,23 @@ gh secret set FLY_API_TOKEN --env production --repo fschweikhardt/fire-mint
 Pushes to `main` run CI and deploy via GitHub Actions. The app URL is `https://fire-mint.fly.dev` (or your chosen `APP_NAME`).
 
 ## Inputs
-- Annual contributions: SIMPLE IRA, ROTH IRA, HSA, 529, and two current savings buckets (taxable and not taxed)
-- Select expected annual return: 3%, 5%, or 7% (one at a time)
-- Start age (default 40) to end age (100)
+
+- **Accounts:** Taxable, Roth IRA, and HSA — each with current balance, annual contribution, and optional yearly step-up amount
+- **529:** Current balance, annual contribution, and its own growth rate
+- **Horizon:** Start age, retire age (contributions stop), end age
+- **Assumptions:** Growth rate (0–14%), inflation, today’s-dollars toggle, fixed-income yield rate
+- **FIRE:** Desired annual spend and withdrawal rate (nest egg = spend ÷ rate)
+
+## Outputs
+
+- **At a glance:** Nest egg and simple yield at key ages, FIRE hit age, $1M milestone
+- **Chart:** Taxable / Roth / HSA / Total balances over time
+- **Tabs:** Year-by-year retirement table, fixed-income table, 529 table, assumptions notes
+- **CSV:** Download of the full projection
 
 ## Notes
-- Output table shows yearly balances per account and totals. "Already have" is last year's total (previous row's total with interest).
+
+- Each year: `balance = balance × (1 + r) + contribution` (end-of-year contribution convention)
+- **TOTAL** is the sum of Taxable + Roth + HSA only (do not add ANNUAL IN again; 529 is separate)
+- **Simple yield** on the Income tab is `total × rate` — illustrative only, not a tax-aware Safe Withdrawal Rate
+- Roth/HSA contribution limit hints are informational; the app does not enforce IRS caps
