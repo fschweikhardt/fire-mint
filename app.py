@@ -41,6 +41,8 @@ class ProjectionResult:
     retirement_display: pd.DataFrame
     fixed_income_display: pd.DataFrame
     education_display: pd.DataFrame
+    tax_split_display: pd.DataFrame
+    tax_split_markdown: str
     chart_df: pd.DataFrame
     kpi_markdown: str
     csv_path: str
@@ -221,7 +223,7 @@ def write_csv(df: pd.DataFrame) -> str:
     return path
 
 
-def project(inputs: Inputs) -> ProjectionResult:
+def project(inputs: Inputs, include_tax_split_in_csv: bool = False) -> ProjectionResult:
     start_age = max(0, inputs.start_age)
     end_age = max(start_age, inputs.end_age)
     retire_age = max(0, inputs.retire_age)
@@ -298,8 +300,13 @@ def project(inputs: Inputs) -> ProjectionResult:
     retirement_rows: List[Tuple] = []
     education_rows: List[Tuple] = []
     fixed_income_rows: List[Tuple] = []
+    tax_split_rows: List[Tuple] = []
     export_rows: List[dict] = []
     chart_rows: List[dict] = []
+
+    taxable_withdraw_col = f"Taxable withdraw @ {fixed_income_label}%"
+    nontax_withdraw_col = f"Non-taxable withdraw @ {fixed_income_label}%"
+    combined_withdraw_col = f"Combined withdraw @ {fixed_income_label}%"
 
     for i, age in enumerate(ages_out):
         taxable_display = round_currency(taxable_out[i])
@@ -309,6 +316,10 @@ def project(inputs: Inputs) -> ProjectionResult:
         total_display = taxable_display + roth_display + hsa_display
         fixed_display = round_currency(fixed_out[i])
         plan_529_display = round_currency(plan_529_out[i])
+        nontax_balance = roth_display + hsa_display
+        taxable_withdraw = round_currency(taxable_display * fixed_r)
+        nontax_withdraw = round_currency(nontax_balance * fixed_r)
+        combined_withdraw = taxable_withdraw + nontax_withdraw
 
         retirement_rows.append(
             (
@@ -328,18 +339,37 @@ def project(inputs: Inputs) -> ProjectionResult:
                 format_currency(fixed_display),
             )
         )
-        export_rows.append(
-            {
-                "Age": age,
-                f"Taxable Accounts @ {growth_label}% ({dollar_label})": taxable_display,
-                f"ROTH IRA @ {growth_label}% ({dollar_label})": roth_display,
-                f"HSA @ {growth_label}% ({dollar_label})": hsa_display,
-                f"ANNUAL IN ({dollar_label})": annual_display,
-                f"TOTAL ({dollar_label})": total_display,
-                f"Annual Fixed Income @ {fixed_income_label}% ({dollar_label})": fixed_display,
-                f"529 Balance @ {plan_529_label}% ({dollar_label})": plan_529_display,
-            }
+        tax_split_rows.append(
+            (
+                age,
+                format_currency(taxable_display),
+                format_currency(nontax_balance),
+                format_currency(taxable_withdraw),
+                format_currency(nontax_withdraw),
+                format_currency(combined_withdraw),
+            )
         )
+        row = {
+            "Age": age,
+            f"Taxable Accounts @ {growth_label}% ({dollar_label})": taxable_display,
+            f"ROTH IRA @ {growth_label}% ({dollar_label})": roth_display,
+            f"HSA @ {growth_label}% ({dollar_label})": hsa_display,
+            f"ANNUAL IN ({dollar_label})": annual_display,
+            f"TOTAL ({dollar_label})": total_display,
+            f"Annual Fixed Income @ {fixed_income_label}% ({dollar_label})": fixed_display,
+            f"529 Balance @ {plan_529_label}% ({dollar_label})": plan_529_display,
+        }
+        if include_tax_split_in_csv:
+            row.update(
+                {
+                    f"Taxable balance ({dollar_label})": taxable_display,
+                    f"Non-taxable balance Roth+HSA ({dollar_label})": nontax_balance,
+                    f"{taxable_withdraw_col} ({dollar_label})": taxable_withdraw,
+                    f"{nontax_withdraw_col} ({dollar_label})": nontax_withdraw,
+                    f"{combined_withdraw_col} ({dollar_label})": combined_withdraw,
+                }
+            )
+        export_rows.append(row)
         for account, value in (
             ("Taxable", taxable_display),
             ("Roth IRA", roth_display),
@@ -371,6 +401,17 @@ def project(inputs: Inputs) -> ProjectionResult:
             f"Annual Fixed Income @ {fixed_income_label}%",
         ],
     )
+    tax_split_df = pd.DataFrame(
+        tax_split_rows,
+        columns=[
+            "Age",
+            "Taxable balance",
+            "Non-taxable balance (Roth + HSA)",
+            taxable_withdraw_col,
+            nontax_withdraw_col,
+            combined_withdraw_col,
+        ],
+    )
     chart_df = pd.DataFrame(chart_rows)
     export_df = pd.DataFrame(export_rows)
 
@@ -390,10 +431,24 @@ def project(inputs: Inputs) -> ProjectionResult:
         inputs, ages_out, kpi_totals, kpi_fixed, dollar_label
     )
 
+    tax_split_markdown = (
+        "### Optional: taxable vs non-taxable withdraw\n\n"
+        f"Same fixed-income rate (**{fixed_income_label}%**) applied separately to "
+        "**Taxable** vs **Roth + HSA** balances.\n\n"
+        "- **Taxable withdraw** = taxable balance × rate\n"
+        "- **Non-taxable withdraw** = (Roth + HSA) × rate "
+        "(qualified Roth / HSA medical-style withdrawals; simplified)\n"
+        "- **Combined** may differ from the standard simple-yield column by $1 "
+        "due to rounding\n\n"
+        "_Optional view only — the standard Fixed Income table above is unchanged._"
+    )
+
     return ProjectionResult(
         retirement_display=retirement_df,
         fixed_income_display=fixed_income_df,
         education_display=education_df,
+        tax_split_display=tax_split_df,
+        tax_split_markdown=tax_split_markdown,
         chart_df=chart_df,
         kpi_markdown=kpi_markdown,
         csv_path=write_csv(export_df),
@@ -425,7 +480,9 @@ def compute_tables(
     real_dollars: bool,
     desired_spend: float,
     withdrawal_rate_pct: float,
+    show_tax_split: bool,
 ):
+    show_split = _as_bool(show_tax_split, False)
     inputs = Inputs(
         taxable_current=_as_float(taxable_current),
         taxable_annual=_as_float(taxable_annual),
@@ -457,12 +514,14 @@ def compute_tables(
         desired_spend=_as_float(desired_spend, 60000),
         withdrawal_rate_pct=_as_float(withdrawal_rate_pct, 4.0),
     )
-    result = project(inputs)
+    result = project(inputs, include_tax_split_in_csv=show_split)
     return (
         result.kpi_markdown,
         result.chart_df,
         result.retirement_display,
         result.fixed_income_display,
+        gr.update(value=result.tax_split_markdown, visible=show_split),
+        gr.update(value=result.tax_split_display, visible=show_split),
         result.education_display,
         result.csv_path,
     )
@@ -613,6 +672,18 @@ just `total × rate` for a quick sense of scale.
                     max_height=300,
                     label="Fixed Income Projection",
                 )
+                show_tax_split = gr.Checkbox(
+                    label="Show taxable vs non-taxable withdrawal split",
+                    value=False,
+                    info="Optional view: does not change the standard simple-yield table above",
+                )
+                tax_split_md = gr.Markdown(visible=False)
+                tax_split_df = gr.Dataframe(
+                    wrap=True,
+                    max_height=300,
+                    label="Taxable vs non-taxable withdraw",
+                    visible=False,
+                )
             with gr.Tab("Education"):
                 gr.Markdown("### 529 plan projection")
                 plan_529_current = gr.Number(
@@ -648,6 +719,8 @@ just `total × rate` for a quick sense of scale.
 5. **Today's dollars** divides each year's figures by `(1 + inflation)^years_from_start`.
 6. **FIRE nest egg** = desired spend ÷ withdrawal rate; first age TOTAL ≥ that amount is the hit.
 7. **Simple yield** on the Income tab is illustrative only — not advice.
+8. **Optional tax split** (Income tab): taxable withdraw = Taxable × rate;
+   non-taxable withdraw = (Roth + HSA) × rate. Off by default; standard figures stay the same.
 
 Contribution limit hints on Roth/HSA are informational soft caps; the app does not enforce them.
                     """
@@ -678,12 +751,15 @@ Contribution limit hints on Roth/HSA are informational soft caps; the app does n
             real_dollars,
             desired_spend,
             withdrawal_rate_pct,
+            show_tax_split,
         ]
         outputs = [
             kpi_md,
             chart,
             retirement_df,
             fixed_income_df,
+            tax_split_md,
+            tax_split_df,
             education_df,
             csv_file,
         ]

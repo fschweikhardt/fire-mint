@@ -62,7 +62,8 @@ Pushes to `main` run CI and deploy via GitHub Actions. The app URL is `https://f
 - **At a glance:** Nest egg and simple yield at key ages, FIRE hit age, $1M milestone
 - **Chart:** Taxable / Roth / HSA / Total balances over time
 - **Tabs:** Year-by-year retirement table, fixed-income table, 529 table, assumptions notes
-- **CSV:** Download of the full projection
+- **Optional tax split** (Income tab, off by default): taxable withdraw (Taxable × rate) vs non-taxable withdraw (Roth + HSA × rate); standard simple-yield figures stay unchanged
+- **CSV:** Download of the full projection (tax-split columns included only when the optional split is enabled)
 
 ## Notes
 
